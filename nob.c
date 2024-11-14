@@ -27,6 +27,12 @@
 
 static char cwd[1024];
 
+static bool string_ends_with(const char* str, const char* ending) {
+    size_t str_len = strlen(str);
+    size_t ending_len = strlen(ending);
+    return str_len >= ending_len && 0 == strncmp(str + str_len - ending_len, ending, ending_len);
+}
+
 bool build_qbe() {
     bool result = true;
     Nob_Cmd cmd = {0};
@@ -120,9 +126,47 @@ defer:;
     return result;
 }
 
+static bool collect_source_files_in_dir(const char* parent, Nob_File_Paths* children) {
+    bool result = true;
+    Nob_File_Paths child_names = {0};
+
+    if (!nob_read_entire_dir(parent, &child_names)) {
+        nob_return_defer(false);
+    }
+
+    for (size_t i = 2; i < child_names.count; i++) {
+        char* child_path = nob_temp_sprintf("%s/%s", parent, child_names.items[i]);
+
+        if (NOB_FILE_DIRECTORY == nob_get_file_type(child_path)) {
+            if (!collect_source_files_in_dir(child_path, children)) {
+                nob_return_defer(false);
+            }
+        }
+
+        if (!string_ends_with(child_path, ".ha")) {
+            continue;
+        }
+
+        nob_da_append(children, child_path);
+    }
+
+defer:;
+    nob_da_free(child_names);
+    return result;
+}
+
 static bool build_pengc() {
     bool result = true;
     Nob_Cmd cmd = {0};
+    Nob_File_Paths pengc_source_files = {0};
+
+    if (!collect_source_files_in_dir("src", &pengc_source_files)) {
+        nob_return_defer(false);
+    }
+    
+    if (!nob_needs_rebuild(PENGC_EXE, pengc_source_files.items, pengc_source_files.count)) {
+        nob_return_defer(true);
+    }
 
     char* path_env = getenv("PATH");
     if (NULL == path_env) {
@@ -133,14 +177,13 @@ static bool build_pengc() {
     setenv("HAREPATH", HARE_VENDOR_DIR "", 1);
     setenv("PATH", nob_temp_sprintf(QBE_VENDOR_DIR ":" HAREC_VENDOR_BIN ":%s", path_env), 1);
 
-    if (nob_needs_rebuild1(PENGC_EXE, "./pengc.ha")) {
-        nob_cmd_append(&cmd, HARE_VENDOR_EXE, "build", "-o", PENGC_EXE, "-t", "bin", "./pengc.ha");
-        if (!nob_cmd_run_sync(cmd)) {
-            nob_return_defer(false);
-        }
+    nob_cmd_append(&cmd, HARE_VENDOR_EXE, "build", "-o", PENGC_EXE, "-t", "bin", "src");
+    if (!nob_cmd_run_sync(cmd)) {
+        nob_return_defer(false);
     }
 
 defer:;
+    nob_da_free(pengc_source_files);
     nob_cmd_free(cmd);
     return result;
 }

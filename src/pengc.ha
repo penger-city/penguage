@@ -1,5 +1,5 @@
 use fmt;
 
 export fn main() void = {
-	fmt::println("Hello, hunter!")!;
+	fmt::println("Hello, pengc!")!;
 };
