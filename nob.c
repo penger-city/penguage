@@ -1,7 +1,4 @@
-#if defined(__linux__)
-#    include <unistd.h>
-#    include <linux/limits.h>
-#else
+#if !defined(__linux__)
 #    error "Sorry, your operating system is not supported :("
 #endif // defined(__linux__)
 
@@ -15,17 +12,11 @@
 #    define QBE_VENDOR_DIR "./vendor/qbe"
 #    define QBE_VENDOR_EXE "./vendor/qbe/qbe"
 
-#    define HAREC_VENDOR_DIR "./vendor/harec"
-#    define HAREC_VENDOR_BIN "./vendor/harec/.bin"
-#    define HAREC_VENDOR_EXE "./vendor/harec/.bin/harec"
-
-#    define HARE_VENDOR_DIR "./vendor/hare"
-#    define HARE_VENDOR_EXE "./vendor/hare/.bin/hare"
+#    define CPROC_VENDOR_DIR "./vendor/cproc"
+#    define CPROC_VENDOR_EXE "./vendor/cproc/cproc"
 
 #    define PENGC_EXE "./pengc"
 #endif // defined(__linux__)
-
-static char cwd[1024];
 
 static bool string_ends_with(const char* str, const char* ending) {
     size_t str_len = strlen(str);
@@ -60,12 +51,12 @@ defer:;
     return result;
 }
 
-bool build_harec() {
+bool build_cproc() {
     bool result = true;
     Nob_Cmd cmd = {0};
 
-    if (!nob_file_exists(HAREC_VENDOR_DIR)) {
-        nob_cmd_append(&cmd, "git", "clone", "https://git.sr.ht/~sircmpwn/harec", HAREC_VENDOR_DIR);
+    if (!nob_file_exists(CPROC_VENDOR_DIR)) {
+        nob_cmd_append(&cmd, "git", "clone", "https://git.sr.ht/~mcf/cproc", CPROC_VENDOR_DIR);
         if (!nob_cmd_run_sync(cmd)) {
             nob_return_defer(false);
         }
@@ -74,12 +65,8 @@ bool build_harec() {
     }
 
 #if defined(__linux__)
-    if (!nob_file_exists(HAREC_VENDOR_EXE)) {
-        if (!nob_file_exists(HAREC_VENDOR_DIR "/config.mk")) {
-            nob_copy_file(HAREC_VENDOR_DIR "/configs/linux.mk", HAREC_VENDOR_DIR "/config.mk");
-        }
-
-        nob_cmd_append(&cmd, "make", "-C", HAREC_VENDOR_DIR);
+    if (!nob_file_exists(CPROC_VENDOR_EXE)) {
+        nob_cmd_append(&cmd, "make", "-C", CPROC_VENDOR_DIR);
         if (!nob_cmd_run_sync(cmd)) {
             nob_return_defer(false);
         }
@@ -93,40 +80,7 @@ defer:;
     return result;
 }
 
-bool build_hare() {
-    bool result = true;
-    Nob_Cmd cmd = {0};
-
-    if (!nob_file_exists(HARE_VENDOR_DIR)) {
-        nob_cmd_append(&cmd, "git", "clone", "https://git.sr.ht/~sircmpwn/hare", HARE_VENDOR_DIR);
-        if (!nob_cmd_run_sync(cmd)) {
-            nob_return_defer(false);
-        }
-
-        cmd.count = 0;
-    }
-
-    if (!nob_file_exists(HARE_VENDOR_EXE)) {
-        if (!nob_file_exists(HARE_VENDOR_DIR "/config.mk")) {
-            nob_copy_file(HARE_VENDOR_DIR "/configs/linux.mk", HARE_VENDOR_DIR "/config.mk");
-        }
-
-        nob_cmd_append(&cmd, "make", "-C", HARE_VENDOR_DIR);
-        nob_cmd_append(&cmd, nob_temp_sprintf("QBE=%s/" QBE_VENDOR_EXE, cwd));
-        nob_cmd_append(&cmd, nob_temp_sprintf("HAREC=%s/" HAREC_VENDOR_EXE, cwd));
-        if (!nob_cmd_run_sync(cmd)) {
-            nob_return_defer(false);
-        }
-
-        cmd.count = 0;
-    }
-
-defer:;
-    nob_cmd_free(cmd);
-    return result;
-}
-
-static bool collect_source_files_in_dir(const char* parent, Nob_File_Paths* children) {
+static bool collect_files_in_dir(const char* parent, const char* extension, Nob_File_Paths* children) {
     bool result = true;
     Nob_File_Paths child_names = {0};
 
@@ -138,12 +92,12 @@ static bool collect_source_files_in_dir(const char* parent, Nob_File_Paths* chil
         char* child_path = nob_temp_sprintf("%s/%s", parent, child_names.items[i]);
 
         if (NOB_FILE_DIRECTORY == nob_get_file_type(child_path)) {
-            if (!collect_source_files_in_dir(child_path, children)) {
+            if (!collect_files_in_dir(child_path, extension, children)) {
                 nob_return_defer(false);
             }
         }
 
-        if (!string_ends_with(child_path, ".ha")) {
+        if (!string_ends_with(child_path, extension)) {
             continue;
         }
 
@@ -159,8 +113,16 @@ static bool build_pengc() {
     bool result = true;
     Nob_Cmd cmd = {0};
     Nob_File_Paths pengc_source_files = {0};
+    Nob_File_Paths pengc_header_files = {0};
+    Nob_File_Paths pengc_object_files = {0};
 
-    if (!collect_source_files_in_dir("src", &pengc_source_files)) {
+    nob_mkdir_if_not_exists(".out");
+
+    if (!collect_files_in_dir("src", ".c", &pengc_source_files)) {
+        nob_return_defer(false);
+    }
+
+    if (!collect_files_in_dir("src", ".h", &pengc_header_files)) {
         nob_return_defer(false);
     }
     
@@ -174,15 +136,34 @@ static bool build_pengc() {
         nob_return_defer(false);
     }
 
-    setenv("HAREPATH", HARE_VENDOR_DIR "", 1);
-    setenv("PATH", nob_temp_sprintf(QBE_VENDOR_DIR ":" HAREC_VENDOR_BIN ":%s", path_env), 1);
+    setenv("PATH", nob_temp_sprintf(QBE_VENDOR_DIR ":" CPROC_VENDOR_DIR ":%s", path_env), 1);
 
-    nob_cmd_append(&cmd, HARE_VENDOR_EXE, "build", "-o", PENGC_EXE, "-t", "bin", "src");
+    for (size_t i = 0; i < pengc_source_files.count; i++) {
+        const char* source_path = pengc_source_files.items[i];
+        const char* object_path = nob_temp_sprintf(".out/%s.o", nob_path_name(source_path));
+        nob_da_append(&pengc_object_files, object_path);
+
+        if (!(nob_needs_rebuild1(object_path, source_path) || nob_needs_rebuild(object_path, pengc_header_files.items, pengc_header_files.count))) {
+            continue;
+        }
+
+        cmd.count = 0;
+        nob_cmd_append(&cmd, CPROC_VENDOR_EXE, "-o", object_path, "-c", source_path);
+        if (!nob_cmd_run_sync(cmd)) {
+            nob_return_defer(false);
+        }
+    }
+
+    cmd.count = 0;
+    nob_cmd_append(&cmd, CPROC_VENDOR_EXE, "-o", PENGC_EXE);
+    nob_da_append_many(&cmd, pengc_object_files.items, pengc_object_files.count);
     if (!nob_cmd_run_sync(cmd)) {
         nob_return_defer(false);
     }
 
 defer:;
+    nob_da_free(pengc_object_files);
+    nob_da_free(pengc_header_files);
     nob_da_free(pengc_source_files);
     nob_cmd_free(cmd);
     return result;
@@ -194,20 +175,11 @@ int main(int argc, char** argv) {
     int result = 0;
     Nob_Cmd cmd = {0};
 
-    if (NULL == getcwd(cwd, sizeof(cwd))) {
-        nob_log(NOB_ERROR, "Could not get the path of the current directory: %s", strerror(errno));
-        nob_return_defer(1);
-    }
-
     if (!build_qbe()) {
         nob_return_defer(1);
     }
 
-    if (!build_harec()) {
-        nob_return_defer(1);
-    }
-
-    if (!build_hare()) {
+    if (!build_cproc()) {
         nob_return_defer(1);
     }
 

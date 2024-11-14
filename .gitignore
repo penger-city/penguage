@@ -1,7 +1,8 @@
 # Editor files
-.vscode
+.vscode/
 
 # Project directory
+.out/
 nob
 nob.old
 nob.exe
@@ -10,6 +11,5 @@ pengc
 pengc.exe
 
 # Vendor files
-vendor/qbe
-vendor/harec
-vendor/hare
+vendor/qbe/
+vendor/cproc/
