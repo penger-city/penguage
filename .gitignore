@@ -1,0 +1,15 @@
+# Editor files
+.vscode
+
+# Project directory
+nob
+nob.old
+nob.exe
+nob.exe.old
+pengc
+pengc.exe
+
+# Vendor files
+vendor/qbe
+vendor/harec
+vendor/hare
